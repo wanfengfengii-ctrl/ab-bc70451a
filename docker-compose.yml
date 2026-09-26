@@ -1,0 +1,49 @@
+name: meridian-restore
+
+services:
+  api:
+    build: ./api
+    expose:
+      - "8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=2).status==200 else 1)"
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  web:
+    build: ./web
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      # Configurable host port: WEB_PORT=9090 docker compose up web
+      - "${WEB_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  # One-shot verification: runs backend tests, the frontend production build
+  # and a restoration API smoke test once its dependencies are healthy, then
+  # exits — the exit code reports the overall result.
+  verify:
+    build:
+      context: .
+      dockerfile: verify/Dockerfile
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    environment:
+      API_BASE_URL: ${API_SMOKE_BASE_URL:-http://web}
+      API_DIRECT_URL: http://api:8000
+    restart: "no"
